@@ -1,0 +1,25 @@
+plugins {
+    id "application"
+    id 'java'
+}
+
+application {
+    mainClassName = "org.proxy.Main"
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile 'org.eclipse.jetty:jetty-server:9.4.7.v20170914'
+    compile 'org.eclipse.jetty:jetty-servlet:9.4.7.v20170914'
+    compile 'org.asynchttpclient:async-http-client:2.12.0'
+
+    compileOnly 'org.projectlombok:lombok:1.18.16'
+
+    annotationProcessor 'org.projectlombok:lombok:1.18.16'
+
+    testCompileOnly 'org.projectlombok:lombok:1.18.16'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.16'
+}
