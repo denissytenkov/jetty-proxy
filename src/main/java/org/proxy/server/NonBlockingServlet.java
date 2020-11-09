@@ -44,13 +44,23 @@ public class NonBlockingServlet extends HttpServlet {
 
 
 
-    protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        handle(req, resp);
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        handle(req, resp);
+    }
+
+    protected void handle(HttpServletRequest request, HttpServletResponse response) throws IOException {
 
         String destinationHost = request.getHeader("x-destination");
 
         AsyncContext async = request.startAsync();
         ServletOutputStream out = response.getOutputStream();
-        Request externalRequets = Dsl.request(request.getMethod(), "https://" + destinationHost + request.getRequestURI())
+        Request externalRequets = Dsl.request(request.getMethod(), "https://" + destinationHost + request.getRequestURI() + "?" + request.getQueryString())
+                .setBody(request.getInputStream())
                 .build();
         asyncHttpClient.executeRequest(externalRequets, new ClientAsyncHandler(response, async, out)).addListener(() -> {}, null);
     }
