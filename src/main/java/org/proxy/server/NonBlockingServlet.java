@@ -12,6 +12,7 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.asynchttpclient.Dsl.asyncHttpClient;
 
@@ -59,9 +60,36 @@ public class NonBlockingServlet extends HttpServlet {
 
         AsyncContext async = request.startAsync();
         ServletOutputStream out = response.getOutputStream();
+        ServletInputStream in = request.getInputStream();
+        AtomicBoolean sync = new AtomicBoolean();
         Request externalRequets = Dsl.request(request.getMethod(), "https://" + destinationHost + request.getRequestURI() + "?" + request.getQueryString())
-                .setBody(request.getInputStream())
+                .setBody(in)
                 .build();
-        asyncHttpClient.executeRequest(externalRequets, new ClientAsyncHandler(response, async, out)).addListener(() -> {}, null);
+        ClientAsyncHandler clientAsyncHandler = new ClientAsyncHandler(response, async, out);
+        in.setReadListener(new ReadListener() {
+            @Override
+            public void onDataAvailable() throws IOException {
+                sendSyncronized(sync, externalRequets, clientAsyncHandler);
+            }
+
+            @Override
+            public void onAllDataRead() throws IOException { }
+
+            @Override
+            public void onError(Throwable t) {
+                response.setStatus(500);
+                async.complete();
+            }
+        });
+        if (in.isReady()) {
+            sendSyncronized(sync, externalRequets, clientAsyncHandler);
+        }
     }
+
+    private void sendSyncronized(AtomicBoolean isRequestSend, Request externalRequets, ClientAsyncHandler clientAsyncHandler) {
+        if (!isRequestSend.compareAndExchange(false, true)) {
+            asyncHttpClient.executeRequest(externalRequets, clientAsyncHandler).addListener(() -> {}, null);
+        }
+    }
+
 }
