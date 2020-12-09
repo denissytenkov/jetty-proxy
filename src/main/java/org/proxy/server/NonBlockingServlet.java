@@ -1,22 +1,26 @@
 package org.proxy.server;
 
-import io.netty.handler.ssl.ClientAuth;
-import io.netty.handler.ssl.SslContextBuilder;
-import io.netty.handler.ssl.SslProvider;
-import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import org.asynchttpclient.*;
-
 import javax.net.ssl.*;
 import javax.servlet.*;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-
-import static org.asynchttpclient.Dsl.asyncHttpClient;
+import java.net.Authenticator;
+import java.net.ProxySelector;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Flow;
 
 public class NonBlockingServlet extends HttpServlet {
-    private AsyncHttpClient asyncHttpClient;
+    private HttpClient asyncHttpClient;
 
     public NonBlockingServlet() throws SSLException {
 
@@ -25,19 +29,16 @@ public class NonBlockingServlet extends HttpServlet {
     @Override
     public void init() throws ServletException {
         try {
-            AsyncHttpClientConfig config = new DefaultAsyncHttpClientConfig.Builder()
-                    .setSslContext(SslContextBuilder
-                            .forClient()
-                            .trustManager(InsecureTrustManagerFactory.INSTANCE)
-                            .clientAuth(ClientAuth.NONE)
-                            .sslProvider(SslProvider.JDK).build())
-                    .setMaxRequestRetry(1)
-                    .setMaxConnections(500)
-                    .setMaxConnectionsPerHost(200)
+            asyncHttpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(30))
+                    .executor(Executors.newFixedThreadPool(2))
+                    .followRedirects(HttpClient.Redirect.ALWAYS)
+                    .proxy(ProxySelector.getDefault())
+                    .sslContext(SSLContext.getDefault())
+                    .version(HttpClient.Version.HTTP_2)
                     .build();
-            asyncHttpClient = asyncHttpClient(config);
-        } catch (SSLException e) {
-            throw new SecurityException(e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new ServletException(e);
         }
 
     }
@@ -59,9 +60,25 @@ public class NonBlockingServlet extends HttpServlet {
 
         AsyncContext async = request.startAsync();
         ServletOutputStream out = response.getOutputStream();
-        Request externalRequets = Dsl.request(request.getMethod(), "https://" + destinationHost + request.getRequestURI() + "?" + request.getQueryString())
-                .setBody(request.getInputStream())
+        ServletInputStream input = request.getInputStream();
+        HttpRequest externalRequets = HttpRequest.newBuilder(URI.create("https://" + destinationHost + request.getRequestURI() + "?" + request.getQueryString()))
+                .method(request.getMethod(), HttpRequest.BodyPublishers.ofInputStream(() -> input))
                 .build();
-        asyncHttpClient.executeRequest(externalRequets, new ClientAsyncHandler(response, async, out)).addListener(() -> {}, null);
+        asyncHttpClient.sendAsync(externalRequets, HttpResponse.BodyHandlers.ofByteArray())
+        .handle((clientResponse, ex) -> {
+            if (ex != null) {
+                ex.printStackTrace();
+                return null;
+            }
+            response.setStatus(clientResponse.statusCode());
+            clientResponse.headers().map().forEach((k, v) -> response.addHeader(k, v.get(0)));
+            try {
+                out.write(clientResponse.body());
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            async.complete();
+            return clientResponse;
+        });
     }
 }
