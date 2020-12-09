@@ -6,18 +6,13 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.net.Authenticator;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
-import java.util.List;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Flow;
 
 public class NonBlockingServlet extends HttpServlet {
     private HttpClient asyncHttpClient;
@@ -64,20 +59,13 @@ public class NonBlockingServlet extends HttpServlet {
         HttpRequest externalRequets = HttpRequest.newBuilder(URI.create("https://" + destinationHost + request.getRequestURI() + "?" + request.getQueryString()))
                 .method(request.getMethod(), HttpRequest.BodyPublishers.ofInputStream(() -> input))
                 .build();
-        asyncHttpClient.sendAsync(externalRequets, HttpResponse.BodyHandlers.ofByteArray())
+        asyncHttpClient.sendAsync(externalRequets, new RequestStartBodyHandler(out, async, response))
         .handle((clientResponse, ex) -> {
             if (ex != null) {
                 ex.printStackTrace();
                 return null;
             }
-            response.setStatus(clientResponse.statusCode());
-            clientResponse.headers().map().forEach((k, v) -> response.addHeader(k, v.get(0)));
-            try {
-                out.write(clientResponse.body());
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            async.complete();
+            System.out.println("Complete");
             return clientResponse;
         });
     }
